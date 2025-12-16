@@ -7,7 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
 } from 'react-native'
-import { getAllWeeks, getWorkoutsForWeek } from '../lib/supabase'
+import { getAllWeeks, getWorkoutsForWeek, getActivities } from '../lib/supabase'
 
 interface Week {
   id: number
@@ -33,12 +33,26 @@ interface Workout {
   is_key_workout: boolean
 }
 
+interface Activity {
+  id: number
+  strava_id: number
+  name: string
+  activity_type: string
+  date: string
+  distance_km: number
+  moving_time_seconds: number
+  elevation_gain: number
+  average_heartrate: number | null
+}
+
 export default function WeekScreen() {
   const [weeks, setWeeks] = useState<Week[]>([])
   const [currentWeekIndex, setCurrentWeekIndex] = useState(0)
   const [workouts, setWorkouts] = useState<Workout[]>([])
+  const [activities, setActivities] = useState<Activity[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [showActivities, setShowActivities] = useState(false)
 
   const loadWeeks = async () => {
     const { data } = await getAllWeeks()
@@ -59,6 +73,11 @@ export default function WeekScreen() {
     setLoading(false)
   }
 
+  const loadActivities = async (startDate: string, endDate: string) => {
+    const { data } = await getActivities(startDate, endDate)
+    setActivities(data || [])
+  }
+
   useEffect(() => {
     loadWeeks()
   }, [])
@@ -67,6 +86,7 @@ export default function WeekScreen() {
     if (weeks.length > 0 && weeks[currentWeekIndex]) {
       setLoading(true)
       loadWorkouts(weeks[currentWeekIndex].id)
+      loadActivities(weeks[currentWeekIndex].start_date, weeks[currentWeekIndex].end_date)
     }
   }, [currentWeekIndex, weeks])
 
@@ -109,6 +129,28 @@ export default function WeekScreen() {
       default: return '📋'
     }
   }
+
+  const getActivityIcon = (type: string) => {
+    switch (type?.toLowerCase()) {
+      case 'run': return '🏃'
+      case 'walk': return '🚶'
+      case 'hike': return '🥾'
+      case 'ride': return '🚴'
+      case 'swim': return '🏊'
+      case 'workout': return '💪'
+      default: return '🏃'
+    }
+  }
+
+  const formatDuration = (seconds: number) => {
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    if (h > 0) return `${h}t ${m}m`
+    return `${m} min`
+  }
+
+  const totalKm = activities.reduce((sum, a) => sum + (a.distance_km || 0), 0)
+  const totalTime = activities.reduce((sum, a) => sum + (a.moving_time_seconds || 0), 0)
 
   const getDayName = (dateStr: string) => {
     const date = new Date(dateStr)
@@ -216,82 +258,224 @@ export default function WeekScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Økter */}
-      {loading ? (
+      {/* Toggle mellom visninger */}
+      <View style={styles.toggleContainer}>
+        <TouchableOpacity
+          style={[styles.toggleButton, !showActivities && styles.toggleButtonActive]}
+          onPress={() => setShowActivities(false)}
+        >
+          <Text style={[styles.toggleText, !showActivities && styles.toggleTextActive]}>
+            Sammenlign
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toggleButton, showActivities && styles.toggleButtonActive]}
+          onPress={() => setShowActivities(true)}
+        >
+          <Text style={[styles.toggleText, showActivities && styles.toggleTextActive]}>
+            Strava ({activities.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Strava aktiviteter */}
+      {showActivities && (
+        <>
+          {/* Ukens totaler */}
+          {activities.length > 0 && (
+            <View style={styles.totalsCard}>
+              <Text style={styles.totalsTitle}>Ukens totaler</Text>
+              <View style={styles.totalsRow}>
+                <View style={styles.totalItem}>
+                  <Text style={styles.totalValue}>{totalKm.toFixed(1)}</Text>
+                  <Text style={styles.totalLabel}>km</Text>
+                </View>
+                <View style={styles.totalItem}>
+                  <Text style={styles.totalValue}>{formatDuration(totalTime)}</Text>
+                  <Text style={styles.totalLabel}>tid</Text>
+                </View>
+                <View style={styles.totalItem}>
+                  <Text style={styles.totalValue}>{activities.length}</Text>
+                  <Text style={styles.totalLabel}>økter</Text>
+                </View>
+                {currentWeek && (
+                  <View style={styles.totalItem}>
+                    <Text style={[
+                      styles.totalValue,
+                      totalKm >= currentWeek.target_km ? styles.goalReached : styles.goalNotReached
+                    ]}>
+                      {Math.round((totalKm / currentWeek.target_km) * 100)}%
+                    </Text>
+                    <Text style={styles.totalLabel}>av mål</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          {activities.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Ingen aktiviteter denne uken</Text>
+              <Text style={styles.emptySubtext}>Aktiviteter fra Strava vises her</Text>
+            </View>
+          ) : (
+            activities.map((activity) => (
+              <View key={activity.id} style={styles.activityCard}>
+                <View style={styles.activityHeader}>
+                  <Text style={styles.activityIcon}>
+                    {getActivityIcon(activity.activity_type)}
+                  </Text>
+                  <View style={styles.activityInfo}>
+                    <Text style={styles.activityName}>{activity.name}</Text>
+                    <Text style={styles.activityDate}>
+                      {getDayName(activity.date)} {formatDate(activity.date)}
+                    </Text>
+                  </View>
+                  <View style={styles.activityStats}>
+                    <Text style={styles.activityDistance}>
+                      {activity.distance_km?.toFixed(1)} km
+                    </Text>
+                    <Text style={styles.activityTime}>
+                      {formatDuration(activity.moving_time_seconds)}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.activityDetails}>
+                  {activity.elevation_gain > 0 && (
+                    <Text style={styles.detailText}>↑ {Math.round(activity.elevation_gain)} m</Text>
+                  )}
+                  {activity.average_heartrate && (
+                    <Text style={styles.detailText}>❤️ {Math.round(activity.average_heartrate)} bpm</Text>
+                  )}
+                  {activity.moving_time_seconds && activity.distance_km > 0 && (
+                    <Text style={styles.detailText}>
+                      Pace: {Math.floor(activity.moving_time_seconds / 60 / activity.distance_km)}:
+                      {String(Math.round((activity.moving_time_seconds / 60 / activity.distance_km % 1) * 60)).padStart(2, '0')} /km
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ))
+          )}
+        </>
+      )}
+
+      {/* Sammenlign planlagt vs faktisk */}
+      {!showActivities && (loading ? (
         <View style={styles.loadingWorkouts}>
           <Text style={styles.loadingText}>Laster økter...</Text>
         </View>
       ) : (
-        workouts.map((workout) => (
-          <View
-            key={workout.id}
-            style={[
-              styles.workoutCard,
-              isToday(workout.date) && styles.todayCard,
-              isPast(workout.date) && styles.pastCard,
-            ]}
-          >
-            <View style={styles.dateColumn}>
-              <Text style={[styles.dayName, isToday(workout.date) && styles.todayText]}>
-                {getDayName(workout.date)}
-              </Text>
-              <Text style={[styles.dateText, isToday(workout.date) && styles.todayText]}>
-                {formatDate(workout.date)}
-              </Text>
-            </View>
+        workouts.map((workout) => {
+          // Finn aktiviteter for denne dagen
+          const dayActivities = activities.filter(a =>
+            a.date.split('T')[0] === workout.date
+          )
+          const dayTotalKm = dayActivities.reduce((sum, a) => sum + (a.distance_km || 0), 0)
+          const hasCompleted = dayActivities.length > 0
+          const targetMet = workout.target_km ? dayTotalKm >= workout.target_km : hasCompleted
 
-            <View style={styles.workoutContent}>
-              <View style={styles.workoutHeader}>
-                <Text style={styles.workoutIcon}>
-                  {getWorkoutIcon(workout.workout_type)}
+          return (
+            <View
+              key={workout.id}
+              style={[
+                styles.workoutCard,
+                isToday(workout.date) && styles.todayCard,
+                isPast(workout.date) && !hasCompleted && styles.missedCard,
+                hasCompleted && targetMet && styles.completedCard,
+                hasCompleted && !targetMet && styles.partialCard,
+              ]}
+            >
+              <View style={styles.dateColumn}>
+                <Text style={[styles.dayName, isToday(workout.date) && styles.todayText]}>
+                  {getDayName(workout.date)}
                 </Text>
-                <Text style={[
-                  styles.workoutTitle,
-                  isPast(workout.date) && styles.pastText
-                ]}>
-                  {workout.title}
+                <Text style={[styles.dateText, isToday(workout.date) && styles.todayText]}>
+                  {formatDate(workout.date)}
                 </Text>
-                {workout.is_key_workout && (
-                  <View style={styles.keyBadge}>
-                    <Text style={styles.keyBadgeText}>KEY</Text>
+                {hasCompleted && (
+                  <Text style={targetMet ? styles.checkMark : styles.partialMark}>
+                    {targetMet ? '✓' : '~'}
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.workoutContent}>
+                {/* Planlagt */}
+                <View style={styles.workoutHeader}>
+                  <Text style={styles.workoutIcon}>
+                    {getWorkoutIcon(workout.workout_type)}
+                  </Text>
+                  <Text style={[
+                    styles.workoutTitle,
+                    isPast(workout.date) && !hasCompleted && styles.pastText
+                  ]}>
+                    {workout.title}
+                  </Text>
+                  {workout.is_key_workout && (
+                    <View style={styles.keyBadge}>
+                      <Text style={styles.keyBadgeText}>KEY</Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.comparisonRow}>
+                  <View style={styles.plannedSection}>
+                    <Text style={styles.sectionLabel}>Planlagt</Text>
+                    {workout.target_km && (
+                      <Text style={styles.plannedValue}>{workout.target_km} km</Text>
+                    )}
+                    {workout.target_duration_minutes && (
+                      <Text style={styles.plannedValue}>{workout.target_duration_minutes} min</Text>
+                    )}
+                    {!workout.target_km && !workout.target_duration_minutes && (
+                      <Text style={styles.plannedValue}>{workout.workout_type}</Text>
+                    )}
+                  </View>
+
+                  <View style={styles.actualSection}>
+                    <Text style={styles.sectionLabel}>Faktisk</Text>
+                    {hasCompleted ? (
+                      <>
+                        <Text style={[
+                          styles.actualValue,
+                          targetMet ? styles.actualValueGood : styles.actualValuePartial
+                        ]}>
+                          {dayTotalKm.toFixed(1)} km
+                        </Text>
+                        <Text style={styles.activityCount}>
+                          {dayActivities.length} {dayActivities.length === 1 ? 'økt' : 'økter'}
+                        </Text>
+                      </>
+                    ) : isPast(workout.date) ? (
+                      <Text style={styles.notDone}>Ikke gjort</Text>
+                    ) : (
+                      <Text style={styles.pending}>-</Text>
+                    )}
+                  </View>
+                </View>
+
+                {/* Vis aktivitetsnavn hvis fullført */}
+                {hasCompleted && (
+                  <View style={styles.activityNames}>
+                    {dayActivities.map(a => (
+                      <Text key={a.id} style={styles.activityNameText}>
+                        {getActivityIcon(a.activity_type)} {a.name}
+                      </Text>
+                    ))}
                   </View>
                 )}
               </View>
 
-              <Text style={[
-                styles.workoutDescription,
-                isPast(workout.date) && styles.pastText
-              ]}>
-                {workout.description}
-              </Text>
-
-              <View style={styles.targets}>
-                {workout.target_km && (
-                  <Text style={styles.targetText}>{workout.target_km} km</Text>
-                )}
-                {workout.target_duration_minutes && (
-                  <Text style={styles.targetText}>{workout.target_duration_minutes} min</Text>
-                )}
-                {workout.intensity && workout.intensity !== 'null' && (
-                  <Text style={[
-                    styles.intensityBadge,
-                    workout.intensity === 'hard' && styles.intensityHard,
-                    workout.intensity === 'moderate' && styles.intensityModerate,
-                  ]}>
-                    {workout.intensity}
-                  </Text>
-                )}
-              </View>
+              {isToday(workout.date) && (
+                <View style={styles.todayIndicator} />
+              )}
             </View>
+          )
+        })
+      ))}
 
-            {isToday(workout.date) && (
-              <View style={styles.todayIndicator} />
-            )}
-          </View>
-        ))
-      )}
-
-      {workouts.length === 0 && !loading && (
+      {!showActivities && workouts.length === 0 && !loading && (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>Ingen økter planlagt denne uken</Text>
         </View>
@@ -432,6 +616,86 @@ const styles = StyleSheet.create({
   pastCard: {
     opacity: 0.6,
   },
+  missedCard: {
+    opacity: 0.7,
+    borderLeftWidth: 4,
+    borderLeftColor: '#ef4444',
+  },
+  completedCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#4ade80',
+  },
+  partialCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#fbbf24',
+  },
+  checkMark: {
+    color: '#4ade80',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  partialMark: {
+    color: '#fbbf24',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  comparisonRow: {
+    flexDirection: 'row',
+    marginTop: 8,
+    gap: 16,
+  },
+  plannedSection: {
+    flex: 1,
+  },
+  actualSection: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  sectionLabel: {
+    color: '#666',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  plannedValue: {
+    color: '#888',
+    fontSize: 16,
+  },
+  actualValue: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actualValueGood: {
+    color: '#4ade80',
+  },
+  actualValuePartial: {
+    color: '#fbbf24',
+  },
+  activityCount: {
+    color: '#666',
+    fontSize: 12,
+  },
+  notDone: {
+    color: '#ef4444',
+    fontSize: 14,
+  },
+  pending: {
+    color: '#666',
+    fontSize: 16,
+  },
+  activityNames: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#0f3460',
+  },
+  activityNameText: {
+    color: '#aaa',
+    fontSize: 13,
+    marginVertical: 2,
+  },
   dateColumn: {
     width: 50,
     marginRight: 16,
@@ -523,5 +787,126 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#666',
     fontSize: 16,
+  },
+  emptySubtext: {
+    color: '#555',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: '#0f3460',
+    borderRadius: 8,
+    padding: 4,
+  },
+  toggleButton: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  toggleButtonActive: {
+    backgroundColor: '#e94560',
+  },
+  toggleText: {
+    color: '#888',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  toggleTextActive: {
+    color: '#fff',
+  },
+  totalsCard: {
+    backgroundColor: '#16213e',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#e94560',
+  },
+  totalsTitle: {
+    color: '#888',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  totalsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  totalItem: {
+    alignItems: 'center',
+  },
+  totalValue: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  totalLabel: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  goalReached: {
+    color: '#4ade80',
+  },
+  goalNotReached: {
+    color: '#fbbf24',
+  },
+  activityCard: {
+    backgroundColor: '#16213e',
+    marginHorizontal: 16,
+    marginVertical: 6,
+    borderRadius: 12,
+    padding: 16,
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activityIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  activityInfo: {
+    flex: 1,
+  },
+  activityName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  activityDate: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 2,
+  },
+  activityStats: {
+    alignItems: 'flex-end',
+  },
+  activityDistance: {
+    color: '#e94560',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  activityTime: {
+    color: '#888',
+    fontSize: 14,
+  },
+  activityDetails: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#0f3460',
+  },
+  detailText: {
+    color: '#888',
+    fontSize: 14,
   },
 })
