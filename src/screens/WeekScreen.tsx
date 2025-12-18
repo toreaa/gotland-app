@@ -7,7 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
 } from 'react-native'
-import { getAllWeeks, getWorkoutsForWeek, getActivities } from '../lib/supabase'
+import { getAllWeeks, getWorkoutsForWeek, getActivities, getBaseTests } from '../lib/supabase'
 
 interface Week {
   id: number
@@ -45,6 +45,17 @@ interface Activity {
   average_heartrate: number | null
 }
 
+interface BaseTest {
+  id: number
+  name: string
+  date: string
+  distance_km: number
+  moving_time_seconds: number
+  average_heartrate: number | null
+  max_heartrate: number | null
+  average_speed: number | null
+}
+
 export default function WeekScreen() {
   const [weeks, setWeeks] = useState<Week[]>([])
   const [currentWeekIndex, setCurrentWeekIndex] = useState(0)
@@ -52,7 +63,8 @@ export default function WeekScreen() {
   const [activities, setActivities] = useState<Activity[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [showActivities, setShowActivities] = useState(false)
+  const [activeTab, setActiveTab] = useState<'compare' | 'strava' | 'basetests'>('compare')
+  const [baseTests, setBaseTests] = useState<BaseTest[]>([])
 
   const loadWeeks = async () => {
     const { data } = await getAllWeeks()
@@ -78,8 +90,14 @@ export default function WeekScreen() {
     setActivities(data || [])
   }
 
+  const loadBaseTests = async () => {
+    const { data } = await getBaseTests()
+    setBaseTests(data || [])
+  }
+
   useEffect(() => {
     loadWeeks()
+    loadBaseTests()
   }, [])
 
   useEffect(() => {
@@ -92,7 +110,7 @@ export default function WeekScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true)
-    await loadWeeks()
+    await Promise.all([loadWeeks(), loadBaseTests()])
     setRefreshing(false)
   }
 
@@ -261,25 +279,33 @@ export default function WeekScreen() {
       {/* Toggle mellom visninger */}
       <View style={styles.toggleContainer}>
         <TouchableOpacity
-          style={[styles.toggleButton, !showActivities && styles.toggleButtonActive]}
-          onPress={() => setShowActivities(false)}
+          style={[styles.toggleButton, activeTab === 'compare' && styles.toggleButtonActive]}
+          onPress={() => setActiveTab('compare')}
         >
-          <Text style={[styles.toggleText, !showActivities && styles.toggleTextActive]}>
+          <Text style={[styles.toggleText, activeTab === 'compare' && styles.toggleTextActive]}>
             Sammenlign
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.toggleButton, showActivities && styles.toggleButtonActive]}
-          onPress={() => setShowActivities(true)}
+          style={[styles.toggleButton, activeTab === 'strava' && styles.toggleButtonActive]}
+          onPress={() => setActiveTab('strava')}
         >
-          <Text style={[styles.toggleText, showActivities && styles.toggleTextActive]}>
+          <Text style={[styles.toggleText, activeTab === 'strava' && styles.toggleTextActive]}>
             Strava ({activities.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toggleButton, activeTab === 'basetests' && styles.toggleButtonActive]}
+          onPress={() => setActiveTab('basetests')}
+        >
+          <Text style={[styles.toggleText, activeTab === 'basetests' && styles.toggleTextActive]}>
+            Base ({baseTests.length})
           </Text>
         </TouchableOpacity>
       </View>
 
       {/* Strava aktiviteter */}
-      {showActivities && (
+      {activeTab === 'strava' && (
         <>
           {/* Ukens totaler */}
           {activities.length > 0 && (
@@ -361,7 +387,7 @@ export default function WeekScreen() {
       )}
 
       {/* Sammenlign planlagt vs faktisk */}
-      {!showActivities && (loading ? (
+      {activeTab === 'compare' && (loading ? (
         <View style={styles.loadingWorkouts}>
           <Text style={styles.loadingText}>Laster økter...</Text>
         </View>
@@ -475,10 +501,146 @@ export default function WeekScreen() {
         })
       ))}
 
-      {!showActivities && workouts.length === 0 && !loading && (
+      {activeTab === 'compare' && workouts.length === 0 && !loading && (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>Ingen økter planlagt denne uken</Text>
         </View>
+      )}
+
+      {/* Basetester */}
+      {activeTab === 'basetests' && (
+        <>
+          <View style={styles.baseTestHeader}>
+            <Text style={styles.baseTestTitle}>Formutvikling</Text>
+            <Text style={styles.baseTestSubtitle}>
+              Aktiviteter med "base" i navnet - sporer puls over tid
+            </Text>
+          </View>
+
+          {baseTests.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Ingen basetester funnet</Text>
+              <Text style={styles.emptySubtext}>
+                Navngi en aktivitet med "base" i Strava
+              </Text>
+            </View>
+          ) : (
+            <>
+              {/* Oppsummering */}
+              {baseTests.length >= 2 && (
+                <View style={styles.baseTestSummary}>
+                  <Text style={styles.summaryTitle}>Utvikling</Text>
+                  <View style={styles.summaryRow}>
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryLabel}>Første</Text>
+                      <Text style={styles.summaryValue}>
+                        {baseTests[0].average_heartrate || '-'} bpm
+                      </Text>
+                      <Text style={styles.summaryDate}>
+                        {new Date(baseTests[0].date).toLocaleDateString('nb-NO', {
+                          day: 'numeric',
+                          month: 'short'
+                        })}
+                      </Text>
+                    </View>
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryLabel}>Siste</Text>
+                      <Text style={styles.summaryValue}>
+                        {baseTests[baseTests.length - 1].average_heartrate || '-'} bpm
+                      </Text>
+                      <Text style={styles.summaryDate}>
+                        {new Date(baseTests[baseTests.length - 1].date).toLocaleDateString('nb-NO', {
+                          day: 'numeric',
+                          month: 'short'
+                        })}
+                      </Text>
+                    </View>
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryLabel}>Endring</Text>
+                      {baseTests[0].average_heartrate && baseTests[baseTests.length - 1].average_heartrate ? (
+                        <>
+                          <Text style={[
+                            styles.summaryValue,
+                            baseTests[baseTests.length - 1].average_heartrate < baseTests[0].average_heartrate
+                              ? styles.positiveChange
+                              : styles.negativeChange
+                          ]}>
+                            {baseTests[baseTests.length - 1].average_heartrate - baseTests[0].average_heartrate} bpm
+                          </Text>
+                          <Text style={styles.summaryDate}>
+                            {baseTests[baseTests.length - 1].average_heartrate < baseTests[0].average_heartrate
+                              ? 'Bedre!' : 'Høyere'}
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={styles.summaryValue}>-</Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Liste over tester */}
+              {baseTests.map((test, index) => {
+                const prevTest = index > 0 ? baseTests[index - 1] : null
+                const hrDiff = prevTest && test.average_heartrate && prevTest.average_heartrate
+                  ? test.average_heartrate - prevTest.average_heartrate
+                  : null
+
+                return (
+                  <View key={test.id} style={styles.baseTestCard}>
+                    <View style={styles.baseTestRow}>
+                      <View style={styles.baseTestDateCol}>
+                        <Text style={styles.baseTestDateDay}>
+                          {new Date(test.date).toLocaleDateString('nb-NO', { day: 'numeric' })}
+                        </Text>
+                        <Text style={styles.baseTestDateMonth}>
+                          {new Date(test.date).toLocaleDateString('nb-NO', { month: 'short' })}
+                        </Text>
+                      </View>
+                      <View style={styles.baseTestInfo}>
+                        <Text style={styles.baseTestName}>{test.name}</Text>
+                        <View style={styles.baseTestStats}>
+                          <Text style={styles.baseTestStat}>
+                            {test.distance_km?.toFixed(2)} km
+                          </Text>
+                          <Text style={styles.baseTestStat}>
+                            {formatDuration(test.moving_time_seconds)}
+                          </Text>
+                          {test.moving_time_seconds && test.distance_km > 0 && (
+                            <Text style={styles.baseTestStat}>
+                              {Math.floor(test.moving_time_seconds / 60 / test.distance_km)}:
+                              {String(Math.round((test.moving_time_seconds / 60 / test.distance_km % 1) * 60)).padStart(2, '0')} /km
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                      <View style={styles.baseTestHR}>
+                        <View style={styles.hrValues}>
+                          <Text style={styles.hrAvg}>
+                            {test.average_heartrate || '-'}
+                          </Text>
+                          <Text style={styles.hrMax}>
+                            / {test.max_heartrate || '-'}
+                          </Text>
+                        </View>
+                        <Text style={styles.hrLabel}>snitt/maks</Text>
+                        {hrDiff !== null && (
+                          <Text style={[
+                            styles.hrTrend,
+                            hrDiff < 0 ? styles.positiveChange : hrDiff > 0 ? styles.negativeChange : styles.neutralChange
+                          ]}>
+                            {hrDiff < 0 ? '↓' : hrDiff > 0 ? '↑' : '→'} {Math.abs(hrDiff)}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                )
+              })}
+            </>
+          )}
+        </>
       )}
 
       {/* Padding på bunnen */}
@@ -908,5 +1070,136 @@ const styles = StyleSheet.create({
   detailText: {
     color: '#888',
     fontSize: 14,
+  },
+  // Base test styles
+  baseTestHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  baseTestTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  baseTestSubtitle: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  baseTestSummary: {
+    backgroundColor: '#16213e',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#4ade80',
+  },
+  summaryTitle: {
+    color: '#4ade80',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  summaryItem: {
+    alignItems: 'center',
+  },
+  summaryLabel: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  summaryValue: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  summaryDate: {
+    color: '#666',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  positiveChange: {
+    color: '#4ade80',
+  },
+  negativeChange: {
+    color: '#ef4444',
+  },
+  neutralChange: {
+    color: '#888',
+  },
+  baseTestCard: {
+    backgroundColor: '#16213e',
+    marginHorizontal: 16,
+    marginVertical: 6,
+    borderRadius: 12,
+    padding: 16,
+  },
+  baseTestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  baseTestDateCol: {
+    width: 45,
+    marginRight: 12,
+  },
+  baseTestDateDay: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  baseTestDateMonth: {
+    color: '#888',
+    fontSize: 12,
+    textTransform: 'uppercase',
+  },
+  baseTestInfo: {
+    flex: 1,
+  },
+  baseTestName: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  baseTestStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  baseTestStat: {
+    color: '#888',
+    fontSize: 13,
+  },
+  baseTestHR: {
+    alignItems: 'flex-end',
+    minWidth: 70,
+  },
+  hrValues: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  hrAvg: {
+    color: '#e94560',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  hrMax: {
+    color: '#888',
+    fontSize: 14,
+  },
+  hrLabel: {
+    color: '#666',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  hrTrend: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 4,
   },
 })

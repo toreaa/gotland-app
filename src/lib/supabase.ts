@@ -111,6 +111,17 @@ export async function getWorkoutsForWeek(weekId: number) {
   return { data, error }
 }
 
+// Hent basetester (aktiviteter med "base" i navnet)
+export async function getBaseTests() {
+  const { data, error } = await supabase
+    .from('activities')
+    .select('id, name, date, distance_km, moving_time_seconds, average_heartrate, max_heartrate, average_speed')
+    .ilike('name', '%base%')
+    .order('date', { ascending: true })
+
+  return { data, error }
+}
+
 // Logg livsstil
 export async function logLifestyle(entry: {
   date: string
