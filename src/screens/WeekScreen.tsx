@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   View,
   Text,
@@ -7,111 +7,44 @@ import {
   RefreshControl,
   TouchableOpacity,
 } from 'react-native'
-import { getAllWeeks, getWorkoutsForWeek, getActivities, getBaseTests } from '../lib/supabase'
-
-interface Week {
-  id: number
-  week_number: number
-  start_date: string
-  end_date: string
-  target_km: number
-  target_elevation: number
-  notes: string
-  phases: { name: string }
-}
-
-interface Workout {
-  id: number
-  date: string
-  title: string
-  description: string
-  workout_type: string
-  target_km: number | null
-  target_duration_minutes: number | null
-  intensity: string
-  lavs_number: number
-  is_key_workout: boolean
-}
-
-interface Activity {
-  id: number
-  strava_id: number
-  name: string
-  activity_type: string
-  date: string
-  distance_km: number
-  moving_time_seconds: number
-  elevation_gain: number
-  average_heartrate: number | null
-}
-
-interface BaseTest {
-  id: number
-  name: string
-  date: string
-  distance_km: number
-  moving_time_seconds: number
-  average_heartrate: number | null
-  max_heartrate: number | null
-  average_speed: number | null
-}
+import { useQuery } from 'convex/react'
+import { api } from '../../convex/_generated/api'
+import { Id } from '../../convex/_generated/dataModel'
 
 export default function WeekScreen() {
-  const [weeks, setWeeks] = useState<Week[]>([])
+  const weeks = useQuery(api.weeks.list)
+  const baseTests = useQuery(api.activities.getBaseTests)
   const [currentWeekIndex, setCurrentWeekIndex] = useState(0)
-  const [workouts, setWorkouts] = useState<Workout[]>([])
-  const [activities, setActivities] = useState<Activity[]>([])
-  const [refreshing, setRefreshing] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'compare' | 'strava' | 'basetests'>('compare')
-  const [baseTests, setBaseTests] = useState<BaseTest[]>([])
+  const [refreshing, setRefreshing] = useState(false)
 
-  const loadWeeks = async () => {
-    const { data } = await getAllWeeks()
-    if (data) {
-      setWeeks(data)
-      // Finn nåværende uke basert på dato
+  // Find current week on initial load
+  useEffect(() => {
+    if (weeks && weeks.length > 0) {
       const today = new Date().toISOString().split('T')[0]
-      const currentIdx = data.findIndex(
-        (w: Week) => w.start_date <= today && w.end_date >= today
+      const currentIdx = weeks.findIndex(
+        (w) => w.start_date <= today && w.end_date >= today
       )
-      setCurrentWeekIndex(currentIdx >= 0 ? currentIdx : 0)
+      if (currentIdx >= 0) {
+        setCurrentWeekIndex(currentIdx)
+      }
     }
-  }
+  }, [weeks])
 
-  const loadWorkouts = async (weekId: number) => {
-    const { data } = await getWorkoutsForWeek(weekId)
-    setWorkouts(data || [])
-    setLoading(false)
-  }
+  const currentWeek = weeks?.[currentWeekIndex]
 
-  const loadActivities = async (startDate: string, endDate: string) => {
-    const { data } = await getActivities(startDate, endDate)
-    setActivities(data || [])
-  }
+  // Get detailed week data for the selected week
+  const weekDetails = useQuery(
+    api.weeks.getById,
+    currentWeek ? { weekId: currentWeek._id as Id<"weeks"> } : "skip"
+  )
 
-  const loadBaseTests = async () => {
-    const { data } = await getBaseTests()
-    setBaseTests(data || [])
-  }
+  const workouts = weekDetails?.workouts || []
+  const activities = weekDetails?.activities || []
 
-  useEffect(() => {
-    loadWeeks()
-    loadBaseTests()
-  }, [])
-
-  useEffect(() => {
-    if (weeks.length > 0 && weeks[currentWeekIndex]) {
-      setLoading(true)
-      loadWorkouts(weeks[currentWeekIndex].id)
-      loadActivities(weeks[currentWeekIndex].start_date, weeks[currentWeekIndex].end_date)
-    }
-  }, [currentWeekIndex, weeks])
-
-  const onRefresh = async () => {
+  const onRefresh = () => {
     setRefreshing(true)
-    await Promise.all([loadWeeks(), loadBaseTests()])
-    setRefreshing(false)
+    setTimeout(() => setRefreshing(false), 500)
   }
 
   const goToPreviousWeek = () => {
@@ -121,15 +54,16 @@ export default function WeekScreen() {
   }
 
   const goToNextWeek = () => {
-    if (currentWeekIndex < weeks.length - 1) {
+    if (weeks && currentWeekIndex < weeks.length - 1) {
       setCurrentWeekIndex(currentWeekIndex + 1)
     }
   }
 
   const goToCurrentWeek = () => {
+    if (!weeks) return
     const today = new Date().toISOString().split('T')[0]
     const currentIdx = weeks.findIndex(
-      (w: Week) => w.start_date <= today && w.end_date >= today
+      (w) => w.start_date <= today && w.end_date >= today
     )
     if (currentIdx >= 0) {
       setCurrentWeekIndex(currentIdx)
@@ -167,8 +101,15 @@ export default function WeekScreen() {
     return `${m} min`
   }
 
-  const totalKm = activities.reduce((sum, a) => sum + (a.distance_km || 0), 0)
-  const totalTime = activities.reduce((sum, a) => sum + (a.moving_time_seconds || 0), 0)
+  const totalKm = useMemo(() =>
+    activities.reduce((sum, a) => sum + (a.distance_km || 0), 0),
+    [activities]
+  )
+
+  const totalTime = useMemo(() =>
+    activities.reduce((sum, a) => sum + (a.moving_time_seconds || 0), 0),
+    [activities]
+  )
 
   const getDayName = (dateStr: string) => {
     const date = new Date(dateStr)
@@ -198,21 +139,19 @@ export default function WeekScreen() {
   }
 
   const isCurrentWeek = () => {
-    if (!weeks[currentWeekIndex]) return false
+    if (!currentWeek) return false
     const today = new Date().toISOString().split('T')[0]
-    const week = weeks[currentWeekIndex]
-    return week.start_date <= today && week.end_date >= today
+    return currentWeek.start_date <= today && currentWeek.end_date >= today
   }
 
-  if (loading && weeks.length === 0) {
+  // Loading state
+  if (!weeks || weeks.length === 0) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>Laster uker...</Text>
       </View>
     )
   }
-
-  const currentWeek = weeks[currentWeekIndex]
 
   return (
     <ScrollView
@@ -236,8 +175,8 @@ export default function WeekScreen() {
           <Text style={styles.weekDates}>
             {currentWeek && formatDateRange(currentWeek.start_date, currentWeek.end_date)}
           </Text>
-          {currentWeek?.phases && (
-            <Text style={styles.phaseName}>{currentWeek.phases.name}</Text>
+          {currentWeek?.phase && (
+            <Text style={styles.phaseName}>{currentWeek.phase.name}</Text>
           )}
         </TouchableOpacity>
 
@@ -299,7 +238,7 @@ export default function WeekScreen() {
           onPress={() => setActiveTab('basetests')}
         >
           <Text style={[styles.toggleText, activeTab === 'basetests' && styles.toggleTextActive]}>
-            Base ({baseTests.length})
+            Base ({baseTests?.length || 0})
           </Text>
         </TouchableOpacity>
       </View>
@@ -324,7 +263,7 @@ export default function WeekScreen() {
                   <Text style={styles.totalValue}>{activities.length}</Text>
                   <Text style={styles.totalLabel}>økter</Text>
                 </View>
-                {currentWeek && (
+                {currentWeek && currentWeek.target_km && (
                   <View style={styles.totalItem}>
                     <Text style={[
                       styles.totalValue,
@@ -346,10 +285,10 @@ export default function WeekScreen() {
             </View>
           ) : (
             activities.map((activity) => (
-              <View key={activity.id} style={styles.activityCard}>
+              <View key={activity._id} style={styles.activityCard}>
                 <View style={styles.activityHeader}>
                   <Text style={styles.activityIcon}>
-                    {getActivityIcon(activity.activity_type)}
+                    {getActivityIcon(activity.activity_type || '')}
                   </Text>
                   <View style={styles.activityInfo}>
                     <Text style={styles.activityName}>{activity.name}</Text>
@@ -362,21 +301,21 @@ export default function WeekScreen() {
                       {activity.distance_km?.toFixed(1)} km
                     </Text>
                     <Text style={styles.activityTime}>
-                      {formatDuration(activity.moving_time_seconds)}
+                      {formatDuration(activity.moving_time_seconds || 0)}
                     </Text>
                   </View>
                 </View>
                 <View style={styles.activityDetails}>
-                  {activity.elevation_gain > 0 && (
-                    <Text style={styles.detailText}>↑ {Math.round(activity.elevation_gain)} m</Text>
+                  {(activity.elevation_gain || 0) > 0 && (
+                    <Text style={styles.detailText}>↑ {Math.round(activity.elevation_gain || 0)} m</Text>
                   )}
                   {activity.average_heartrate && (
                     <Text style={styles.detailText}>❤️ {Math.round(activity.average_heartrate)} bpm</Text>
                   )}
-                  {activity.moving_time_seconds && activity.distance_km > 0 && (
+                  {activity.moving_time_seconds && (activity.distance_km || 0) > 0 && (
                     <Text style={styles.detailText}>
-                      Pace: {Math.floor(activity.moving_time_seconds / 60 / activity.distance_km)}:
-                      {String(Math.round((activity.moving_time_seconds / 60 / activity.distance_km % 1) * 60)).padStart(2, '0')} /km
+                      Pace: {Math.floor(activity.moving_time_seconds / 60 / (activity.distance_km || 1))}:
+                      {String(Math.round((activity.moving_time_seconds / 60 / (activity.distance_km || 1) % 1) * 60)).padStart(2, '0')} /km
                     </Text>
                   )}
                 </View>
@@ -387,7 +326,7 @@ export default function WeekScreen() {
       )}
 
       {/* Sammenlign planlagt vs faktisk */}
-      {activeTab === 'compare' && (loading ? (
+      {activeTab === 'compare' && (weekDetails === undefined ? (
         <View style={styles.loadingWorkouts}>
           <Text style={styles.loadingText}>Laster økter...</Text>
         </View>
@@ -403,7 +342,7 @@ export default function WeekScreen() {
 
           return (
             <View
-              key={workout.id}
+              key={workout._id}
               style={[
                 styles.workoutCard,
                 isToday(workout.date) && styles.todayCard,
@@ -485,8 +424,8 @@ export default function WeekScreen() {
                 {hasCompleted && (
                   <View style={styles.activityNames}>
                     {dayActivities.map(a => (
-                      <Text key={a.id} style={styles.activityNameText}>
-                        {getActivityIcon(a.activity_type)} {a.name}
+                      <Text key={a._id} style={styles.activityNameText}>
+                        {getActivityIcon(a.activity_type || '')} {a.name}
                       </Text>
                     ))}
                   </View>
@@ -501,7 +440,7 @@ export default function WeekScreen() {
         })
       ))}
 
-      {activeTab === 'compare' && workouts.length === 0 && !loading && (
+      {activeTab === 'compare' && workouts.length === 0 && weekDetails !== undefined && (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>Ingen økter planlagt denne uken</Text>
         </View>
@@ -517,7 +456,7 @@ export default function WeekScreen() {
             </Text>
           </View>
 
-          {baseTests.length === 0 ? (
+          {!baseTests || baseTests.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>Ingen basetester funnet</Text>
               <Text style={styles.emptySubtext}>
@@ -557,24 +496,27 @@ export default function WeekScreen() {
                     </View>
                     <View style={styles.summaryItem}>
                       <Text style={styles.summaryLabel}>Endring</Text>
-                      {baseTests[0].average_heartrate && baseTests[baseTests.length - 1].average_heartrate ? (
-                        <>
-                          <Text style={[
-                            styles.summaryValue,
-                            baseTests[baseTests.length - 1].average_heartrate < baseTests[0].average_heartrate
-                              ? styles.positiveChange
-                              : styles.negativeChange
-                          ]}>
-                            {baseTests[baseTests.length - 1].average_heartrate - baseTests[0].average_heartrate} bpm
-                          </Text>
-                          <Text style={styles.summaryDate}>
-                            {baseTests[baseTests.length - 1].average_heartrate < baseTests[0].average_heartrate
-                              ? 'Bedre!' : 'Høyere'}
-                          </Text>
-                        </>
-                      ) : (
-                        <Text style={styles.summaryValue}>-</Text>
-                      )}
+                      {(() => {
+                        const firstHR = baseTests[0]?.average_heartrate
+                        const lastHR = baseTests[baseTests.length - 1]?.average_heartrate
+                        if (firstHR && lastHR) {
+                          const diff = lastHR - firstHR
+                          return (
+                            <>
+                              <Text style={[
+                                styles.summaryValue,
+                                diff < 0 ? styles.positiveChange : styles.negativeChange
+                              ]}>
+                                {diff} bpm
+                              </Text>
+                              <Text style={styles.summaryDate}>
+                                {diff < 0 ? 'Bedre!' : 'Høyere'}
+                              </Text>
+                            </>
+                          )
+                        }
+                        return <Text style={styles.summaryValue}>-</Text>
+                      })()}
                     </View>
                   </View>
                 </View>
@@ -588,7 +530,7 @@ export default function WeekScreen() {
                   : null
 
                 return (
-                  <View key={test.id} style={styles.baseTestCard}>
+                  <View key={test._id} style={styles.baseTestCard}>
                     <View style={styles.baseTestRow}>
                       <View style={styles.baseTestDateCol}>
                         <Text style={styles.baseTestDateDay}>
@@ -605,12 +547,12 @@ export default function WeekScreen() {
                             {test.distance_km?.toFixed(2)} km
                           </Text>
                           <Text style={styles.baseTestStat}>
-                            {formatDuration(test.moving_time_seconds)}
+                            {formatDuration(test.moving_time_seconds || 0)}
                           </Text>
-                          {test.moving_time_seconds && test.distance_km > 0 && (
+                          {test.moving_time_seconds && (test.distance_km || 0) > 0 && (
                             <Text style={styles.baseTestStat}>
-                              {Math.floor(test.moving_time_seconds / 60 / test.distance_km)}:
-                              {String(Math.round((test.moving_time_seconds / 60 / test.distance_km % 1) * 60)).padStart(2, '0')} /km
+                              {Math.floor(test.moving_time_seconds / 60 / (test.distance_km || 1))}:
+                              {String(Math.round((test.moving_time_seconds / 60 / (test.distance_km || 1) % 1) * 60)).padStart(2, '0')} /km
                             </Text>
                           )}
                         </View>

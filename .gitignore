@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Auto Claude data directory
+.auto-claude/
+
+# Claude Code working file
+PROJECT_STATUS.md

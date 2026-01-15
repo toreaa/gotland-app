@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar'
 import { NavigationContainer } from '@react-navigation/native'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { Text, View } from 'react-native'
+import { ConvexClientProvider } from './src/lib/ConvexProvider'
 
 import DashboardScreen from './src/screens/DashboardScreen'
 import WeekScreen from './src/screens/WeekScreen'
@@ -54,9 +55,10 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 
 export default function App() {
   return (
-    <NavigationContainer>
-      <StatusBar style="light" />
-      <Tab.Navigator
+    <ConvexClientProvider>
+      <NavigationContainer>
+        <StatusBar style="light" />
+        <Tab.Navigator
         screenOptions={({ route }) => ({
           tabBarIcon: ({ focused }) => <TabIcon name={route.name} focused={focused} />,
           tabBarActiveTintColor: '#e94560',
@@ -105,7 +107,8 @@ export default function App() {
           component={SettingsScreen}
           options={{ title: 'Innstillinger' }}
         />
-      </Tab.Navigator>
-    </NavigationContainer>
+        </Tab.Navigator>
+      </NavigationContainer>
+    </ConvexClientProvider>
   )
 }

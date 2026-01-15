@@ -1,92 +1,34 @@
-import React, { useEffect, useState } from 'react'
+import React from 'react'
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   RefreshControl,
-  TouchableOpacity,
 } from 'react-native'
-import { calculateLavs, getTodaysWorkout, supabase } from '../lib/supabase'
+import { useQuery } from 'convex/react'
+import { api } from '../../convex/_generated/api'
 
-interface Workout {
-  id: number
-  title: string
-  description: string
-  workout_type: string
-  target_km: number | null
-  target_duration_minutes: number | null
-  intensity: string
-  lavs_number: number
-  is_key_workout: boolean
-}
-
-interface WeekSummary {
-  target_km: number
-  actual_km: number
-  completion_percentage: number
+// Beregn dager til Gotland
+function calculateLavs(): number {
+  const raceDate = new Date('2026-07-04')
+  const today = new Date()
+  const diffTime = raceDate.getTime() - today.getTime()
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
 }
 
 export default function DashboardScreen() {
-  const [lavs, setLavs] = useState(0)
-  const [todaysWorkout, setTodaysWorkout] = useState<Workout | null>(null)
-  const [weekSummary, setWeekSummary] = useState<WeekSummary | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const todaysWorkout = useQuery(api.workouts.getToday)
+  const currentWeek = useQuery(api.weeks.getCurrent)
+  const [refreshing, setRefreshing] = React.useState(false)
 
-  const loadData = async () => {
-    setLavs(calculateLavs())
+  const lavs = calculateLavs()
 
-    // Hent dagens økt
-    const { data: workout } = await getTodaysWorkout()
-    setTodaysWorkout(workout)
-
-    // Hent denne ukens status
-    const today = new Date()
-    const monday = new Date(today)
-    monday.setDate(today.getDate() - today.getDay() + 1)
-
-    const { data: week } = await supabase
-      .from('weeks')
-      .select('id, target_km')
-      .lte('start_date', today.toISOString().split('T')[0])
-      .gte('end_date', today.toISOString().split('T')[0])
-      .single()
-
-    if (week) {
-      const { data: summary } = await supabase
-        .from('weekly_summaries')
-        .select('*')
-        .eq('week_id', week.id)
-        .single()
-
-      if (summary) {
-        setWeekSummary({
-          target_km: week.target_km,
-          actual_km: summary.actual_km || 0,
-          completion_percentage: summary.completion_percentage || 0,
-        })
-      } else {
-        setWeekSummary({
-          target_km: week.target_km,
-          actual_km: 0,
-          completion_percentage: 0,
-        })
-      }
-    }
-
-    setLoading(false)
-  }
-
-  const onRefresh = async () => {
+  const onRefresh = () => {
+    // Convex auto-updates, men vi kan simulere refresh
     setRefreshing(true)
-    await loadData()
-    setRefreshing(false)
+    setTimeout(() => setRefreshing(false), 500)
   }
-
-  useEffect(() => {
-    loadData()
-  }, [])
 
   const getWorkoutIcon = (type: string) => {
     switch (type) {
@@ -99,13 +41,21 @@ export default function DashboardScreen() {
     }
   }
 
-  if (loading) {
+  // Loading state
+  if (todaysWorkout === undefined || currentWeek === undefined) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>Laster...</Text>
       </View>
     )
   }
+
+  // Calculate week summary from current week data
+  const weekSummary = currentWeek ? {
+    target_km: currentWeek.week?.target_km || 0,
+    actual_km: currentWeek.summary?.actual_km || 0,
+    completion_percentage: currentWeek.summary?.completion_percentage || 0,
+  } : null
 
   return (
     <ScrollView
