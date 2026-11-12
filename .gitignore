@@ -45,3 +45,6 @@ yarn-error.*
 
 # Claude Code working file
 PROJECT_STATUS.md
+
+# Lokale miljøfiler – CI lager .env selv
+.env
