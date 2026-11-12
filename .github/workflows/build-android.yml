@@ -50,7 +50,7 @@ jobs:
         run: echo "version=$(node -p "require('./app.json').expo.version")" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: v${{ steps.version.outputs.version }}-${{ github.run_number }}
           name: Gotland 2026 v${{ steps.version.outputs.version }} (Build ${{ github.run_number }})
